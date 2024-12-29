@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: ${APPLICATION_NAME:movie-service-registry}
+server:
+  port: ${SERVER_PORT:8761}
+
+eureka:
+  client:
+    register-with-eureka: ${REGISTER_WITH_EUREKA:false}
+    fetch-registry: ${FETCH_REGISTRY:true}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+        
+
