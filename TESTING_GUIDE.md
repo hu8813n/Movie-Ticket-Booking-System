@@ -1,5 +1,6 @@
 # Movie Ticket Booking System — Testing Guide
 
+
 ## Architecture Overview
 
 ```
@@ -30,7 +31,8 @@ Client → API Gateway (8765)
 ## Step 1 — Start Everything
 
 ```bash
-cd Movie-Ticket-Booking-System-FIXED
+git clone 
+cd Movie-Ticket-Booking-System
 
 # Build and start all services
 docker compose up --build
@@ -255,22 +257,3 @@ docker compose down -v         # stop + delete volumes (wipes DB data)
 ```
 
 ---
-
-## Bugs Fixed (Summary)
-
-| # | Location | Issue | Fix |
-|---|----------|-------|-----|
-| 1 | `IBookingService` | `@Service` on an interface causes Spring conflict | Removed |
-| 2 | `IPaymentService` | `@RequestBody` annotation on service interface method | Removed |
-| 3 | `PaymentServiceBroker` | `@Component` redundant on `@FeignClient`; wrong `CommonsLog` import; unused `@GetMapping` import | Cleaned |
-| 4 | `PaymentServiceImpl` | Kafka publisher wired out (commented); payment entity status never re-saved; `NPE` risk on null booking status | All fixed |
-| 5 | `BookingServiceKafkaListener` / `PaymentServiceKafkaListener` | `PaymentServiceKafkaListener` entirely missing | Created |
-| 6 | `PaymentServiceKafkaPublisher` | Entire class missing | Created |
-| 7 | `StripePaymentGateway` | Amount sent in dollars; Stripe requires cents (× 100). Trailing space in `"tok_visa "` | Fixed |
-| 8 | `booking-service/application.yaml` | `?createDatabaseIfNotExist=true` inside env-var default breaks URL parsing; hardcoded Kafka host list not injectable; missing `trusted.packages` | Fixed |
-| 9 | `payment-service/application.yaml` | Same URL bug; Kafka not injectable; missing `trusted.packages`; Stripe key hardcoded | Fixed |
-| 10 | `docker-compose.yml` | No MySQL service; no Kafka/Zookeeper; no DB env vars; `booking-service` depended on `api-gateway` (wrong); notification-service commented out | Fully rebuilt |
-| 11 | `payment-service/pom.xml` | Missing `spring-kafka` dependency | Added |
-| 12 | All service `pom.xml` files | Invalid XML tag `<n>` should be `<n>` | Fixed |
-| 13 | `LoggerConstants` | `EXITING_SERVICE_MESSAGE` had wrong copy-pasted message text | Fixed |
-| 14 | `BookingControllerFallbackApi` | Unused `reactor.core.publisher.Mono` import (causes compile warning) | Removed |
