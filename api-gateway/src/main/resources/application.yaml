@@ -1,0 +1,38 @@
+server:
+  port: ${SERVER_PORT:8765}
+
+spring:
+  application:
+    name: ${APPLICATION_NAME:api-gateway}
+
+  cloud:
+    gateway:
+      routes:
+        - id: bookings-route
+          uri: lb://booking-service  #lb= load balancer
+          predicates:
+            - Path=/bookings/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: booking-route
+                fallbackUri: forward:/booking-fallback
+
+
+
+eureka:
+  client:
+    register-with-eureka: ${REGISTER_WITH_EUREKA:true}
+    service-url:
+      defaultZone: ${DEFAULT_ZONE:http://localhost:8761/eureka/}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true

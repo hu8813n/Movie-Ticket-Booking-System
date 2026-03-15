@@ -1,0 +1,223 @@
+# Fixed docker-compose.yml
+# Changes:
+#  - Added MySQL service for booking-service and payment-service
+#  - Added Zookeeper + 3-broker Kafka cluster + topic initializer
+#  - Added Kafka env vars (KAFKA_BOOTSTRAP_SERVERS, MYSQL_HOST/USER/PASSWORD/DB)
+#  - Removed circular depends_on: api-gateway from booking-service
+#  - Uncommented notification-service
+#  - Added health checks to kafka-broker-1 so init-kafka can wait
+
+services:
+
+  # ─── Infrastructure ───────────────────────────────────────────────────────────
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: echo ruok | nc localhost 2181 || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka-broker-1:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: kafka-broker-1
+    ports:
+      - "19092:19092"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-1:9092,LISTENER_LOCAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,LISTENER_LOCAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    healthcheck:
+      test: kafka-topics --bootstrap-server localhost:9092 --list || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  kafka-broker-2:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: kafka-broker-2
+    ports:
+      - "29092:29092"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-2:9092,LISTENER_LOCAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,LISTENER_LOCAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+
+  kafka-broker-3:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: kafka-broker-3
+    ports:
+      - "39092:39092"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-3:9092,LISTENER_LOCAL://localhost:39092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,LISTENER_LOCAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+
+  init-kafka:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: init-kafka
+    depends_on:
+      kafka-broker-1:
+        condition: service_healthy
+    entrypoint: [ '/bin/sh', '-c' ]
+    command: |
+      "
+      echo 'Creating kafka topics...'
+      kafka-topics --bootstrap-server kafka-broker-1:9092 --delete --topic payment-request --if-exists
+      kafka-topics --bootstrap-server kafka-broker-1:9092 --delete --topic payment-response --if-exists
+      kafka-topics --bootstrap-server kafka-broker-1:9092 --create --if-not-exists --topic payment-request --replication-factor 3 --partitions 3
+      kafka-topics --bootstrap-server kafka-broker-1:9092 --create --if-not-exists --topic payment-response --replication-factor 3 --partitions 3
+      echo 'Topics created:'
+      kafka-topics --bootstrap-server kafka-broker-1:9092 --list
+      "
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: movie_user
+      MYSQL_PASSWORD: movie_pass
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ─── Spring Services ──────────────────────────────────────────────────────────
+
+  eureka-server:
+    build: ./movie-service-registry
+    container_name: eureka-server
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: "curl --fail --silent localhost:8761/actuator/health/readiness | grep UP || exit 0"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    environment:
+      - SERVER_PORT=8761
+      - APPLICATION_NAME=movie-service-registry
+      - REGISTER_WITH_EUREKA=false
+      - FETCH_REGISTRY=false
+
+  api-gateway:
+    build: ./api-gateway
+    container_name: api-gateway
+    ports:
+      - "8765:8765"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: "curl --fail --silent localhost:8765/actuator/health/readiness | grep UP || exit 0"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    environment:
+      - SERVER_PORT=8765
+      - APPLICATION_NAME=api-gateway
+      - REGISTER_WITH_EUREKA=true
+      - DEFAULT_ZONE=http://eureka-server:8761/eureka
+
+  payment-service:
+    build: ./payment-service
+    container_name: payment-service
+    ports:
+      - "8081:8081"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      kafka-broker-1:
+        condition: service_healthy
+    healthcheck:
+      test: "curl --fail --silent localhost:8081/actuator/health/readiness | grep UP || exit 0"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    environment:
+      - SERVER_PORT=8081
+      - APPLICATION_NAME=payment-service
+      - REGISTER_WITH_EUREKA=true
+      - DEFAULT_ZONE=http://eureka-server:8761/eureka
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DB=payments
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=root
+      - KAFKA_BOOTSTRAP_SERVERS=kafka-broker-1:9092,kafka-broker-2:9092,kafka-broker-3:9092
+
+  booking-service:
+    build: ./booking-service
+    container_name: booking-service
+    ports:
+      - "8080:8080"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      kafka-broker-1:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    environment:
+      - SERVER_PORT=8080
+      - APPLICATION_NAME=booking-service
+      - REGISTER_WITH_EUREKA=true
+      - DEFAULT_ZONE=http://eureka-server:8761/eureka/
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DB=bookings
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=root
+      - KAFKA_BOOTSTRAP_SERVERS=kafka-broker-1:9092,kafka-broker-2:9092,kafka-broker-3:9092
+
+  notification-service:
+    build: ./notification-service
+    container_name: notification-service
+    ports:
+      - "8082:8082"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    environment:
+      - SERVER_PORT=8082
+      - APPLICATION_NAME=notification-service
+      - REGISTER_WITH_EUREKA=true
+      - DEFAULT_ZONE=http://eureka-server:8761/eureka/
